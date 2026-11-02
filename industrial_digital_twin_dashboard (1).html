@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Industrial Digital Twin | RRCE</title>
+  <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    :root {
+      --bg: #0b1220; --panel: #121c2e; --panel2: #17243a; --line: #263650;
+      --text: #eef4ff; --muted: #91a4c0; --cyan: #42d6e8; --green: #43d99b;
+      --amber: #ffbd59; --red: #ff687b;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: radial-gradient(ellipse at top right, #172c49 0, var(--bg) 48%); color: var(--text); font: 15px/1.5 Inter, Segoe UI, Arial, sans-serif; }
+    .wrap { max-width: 1280px; margin: auto; padding: 28px 22px 44px; }
+    header { display:flex; align-items:center; justify-content:space-between; gap:20px; flex-wrap:wrap; margin-bottom:26px; }
+    .brand { display:flex; gap:14px; align-items:center; }
+    .logo { width:48px;height:48px;border-radius:14px;background:linear-gradient(135deg,#35d6e8,#4b7dff);display:grid;place-items:center;font-size:24px;box-shadow:0 8px 28px #24b9d633; }
+    h1 { margin:0; font-size:clamp(22px,3vw,30px); letter-spacing:-.5px; }
+    .subtitle { color:var(--muted); margin-top:3px; }
+    .status { border:1px solid var(--line); border-radius:999px; padding:9px 14px; display:flex;align-items:center;gap:9px;background:#101a2b; }
+    .dot { width:9px;height:9px;border-radius:50%;background:var(--amber);box-shadow:0 0 12px currentColor; }
+    .dot.online { background:var(--green); color:var(--green); }
+    .dot.offline { background:var(--red); color:var(--red); }
+    .banner { background:linear-gradient(110deg,#122740,#15213a);border:1px solid #2a4566;border-radius:18px;padding:18px 20px;margin-bottom:20px;display:flex;justify-content:space-between;gap:20px;flex-wrap:wrap; }
+    .banner strong { display:block;font-size:16px; }
+    .small { color:var(--muted);font-size:13px; }
+    .grid { display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:16px; }
+    .card { background:linear-gradient(145deg,var(--panel),#10192a);border:1px solid var(--line);border-radius:18px;padding:20px;min-width:0; }
+    .cardhead { display:flex;align-items:center;justify-content:space-between;gap:10px; }
+    .label { color:var(--muted);font-weight:600;font-size:13px;letter-spacing:.25px; }
+    .icon { width:36px;height:36px;border-radius:11px;background:var(--panel2);display:grid;place-items:center;font-size:18px; }
+    .value { font-size:clamp(28px,3vw,38px);font-weight:750;letter-spacing:-1px;margin:20px 0 4px;overflow-wrap:anywhere; }
+    .unit { font-size:15px;color:var(--muted);font-weight:500;letter-spacing:0; }
+    .foot { display:flex;align-items:center;gap:7px;color:var(--muted);font-size:12px;margin-top:12px; }
+    .sensor-dot { width:7px;height:7px;border-radius:50%;background:var(--green); }
+    .sensor-dot.error { background:var(--red); }
+    .lower { display:grid;grid-template-columns:1.6fr 1fr;gap:16px;margin-top:16px; }
+    .panel-title { font-size:16px;font-weight:700;margin:0 0 4px; }
+    .chartbox { height:300px;margin-top:18px; }
+    .motion-grid { display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px; }
+    .axis { background:var(--panel2);border:1px solid var(--line);border-radius:12px;padding:12px; }
+    .axis small { display:block;color:var(--muted);font-size:12px; }
+    .axis strong { display:block;font-size:20px;margin-top:4px; }
+    .details { display:grid;gap:11px;margin-top:18px; }
+    .detail { display:flex;justify-content:space-between;gap:12px;border-bottom:1px solid #24334a;padding-bottom:10px; }
+    .detail span:first-child { color:var(--muted); }
+    .detail span:last-child { text-align:right;overflow-wrap:anywhere; }
+    footer { text-align:center;color:var(--muted);font-size:12px;margin-top:24px; }
+    @media(max-width:900px){.grid{grid-template-columns:repeat(2,minmax(0,1fr));}.lower{grid-template-columns:1fr;}}
+    @media(max-width:520px){.wrap{padding:18px 12px 30px}.grid{grid-template-columns:1fr 1fr;gap:10px}.card{padding:14px}.value{font-size:27px}.banner{padding:15px}.motion-grid{gap:6px}.axis{padding:9px}}
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <header>
+      <div class="brand">
+        <div class="logo">⌁</div>
+        <div>
+          <h1>Industrial Digital Twin</h1>
+          <div class="subtitle">Smart Data Center · Live Sensor Monitoring · RRCE</div>
+        </div>
+      </div>
+      <div class="status"><span id="connectionDot" class="dot"></span><span id="connectionText">Connecting to MQTT…</span></div>
+    </header>
+
+    <section class="banner">
+      <div>
+        <strong>Live infrastructure telemetry</strong>
+        <div class="small">This page displays real ESP32 messages. No demo values are inserted.</div>
+      </div>
+      <div>
+        <div class="small">Last message received</div>
+        <strong id="lastUpdate">Waiting for sensor data…</strong>
+      </div>
+    </section>
+
+    <section class="grid">
+      <article class="card">
+        <div class="cardhead"><span class="label">TEMPERATURE</span><span class="icon">🌡️</span></div>
+        <div class="value" id="temperature">— <span class="unit">°C</span></div>
+        <div class="small">DHT22 environmental sensor</div>
+        <div class="foot"><span id="dhtDot" class="sensor-dot error"></span><span id="dhtStatus">Waiting for sensor data</span></div>
+      </article>
+      <article class="card">
+        <div class="cardhead"><span class="label">HUMIDITY</span><span class="icon">💧</span></div>
+        <div class="value" id="humidity">— <span class="unit">%</span></div>
+        <div class="small">Relative humidity</div>
+        <div class="foot"><span id="humidityDot" class="sensor-dot error"></span><span id="humidityStatus">Waiting for sensor data</span></div>
+      </article>
+      <article class="card">
+        <div class="cardhead"><span class="label">CURRENT</span><span class="icon">⚡</span></div>
+        <div class="value" id="current">— <span class="unit">A</span></div>
+        <div class="small">ACS712 current sensor</div>
+        <div class="foot"><span class="sensor-dot"></span><span>ACS712 reading received</span></div>
+      </article>
+      <article class="card">
+        <div class="cardhead"><span class="label">MOTION / VIBRATION</span><span class="icon">〰️</span></div>
+        <div class="value" id="motionStatus">—</div>
+        <div class="small">MPU6050 accelerometer & gyroscope</div>
+        <div class="foot"><span id="mpuDot" class="sensor-dot error"></span><span id="mpuText">Waiting for sensor data</span></div>
+      </article>
+    </section>
+
+    <section class="lower">
+      <article class="card">
+        <h2 class="panel-title">Environmental Trends</h2>
+        <div class="small">Temperature and humidity · Recent received messages</div>
+        <div class="chartbox"><canvas id="trendChart"></canvas></div>
+      </article>
+      <article class="card">
+        <h2 class="panel-title">Motion Sensor Details</h2>
+        <div class="small">MPU6050 measurements (acceleration in m/s², gyroscope in rad/s)</div>
+        <div class="motion-grid">
+          <div class="axis"><small>Accel X</small><strong id="ax">—</strong></div>
+          <div class="axis"><small>Accel Y</small><strong id="ay">—</strong></div>
+          <div class="axis"><small>Accel Z</small><strong id="az">—</strong></div>
+          <div class="axis"><small>Gyro X</small><strong id="gx">—</strong></div>
+          <div class="axis"><small>Gyro Y</small><strong id="gy">—</strong></div>
+          <div class="axis"><small>Gyro Z</small><strong id="gz">—</strong></div>
+        </div>
+        <div class="details">
+          <div class="detail"><span>MPU6050 temperature</span><span id="mpuTemp">—</span></div>
+          <div class="detail"><span>MQTT broker</span><span>HiveMQ public broker</span></div>
+          <div class="detail"><span>Data topic</span><span id="topicDisplay">—</span></div>
+          <div class="detail"><span>Connection mode</span><span>MQTT over WebSockets (TLS)</span></div>
+        </div>
+      </article>
+    </section>
+    <footer>Industrial Digital Twin · RRCE · ESP32 live telemetry</footer>
+  </main>
+
+  <script>
+    // Must match the topic used in your ESP32 sketch.
+    const MQTT_HOST = "wss://broker.hivemq.com:8884/mqtt";
+    const MQTT_TOPIC = "rrce/industrial-digital-twin/esp32-akshay-4422/sensors";
+    document.getElementById("topicDisplay").textContent = MQTT_TOPIC;
+
+    const $ = id => document.getElementById(id);
+    let lastReceivedAt = 0;
+    const labels = [], tempValues = [], humidityValues = [];
+
+    const chart = new Chart($("trendChart"), {
+      type: "line",
+      data: { labels, datasets: [
+        { label: "Temperature °C", data: tempValues, borderColor: "#42d6e8", backgroundColor: "#42d6e822", tension: .3, pointRadius: 2, yAxisID: "y" },
+        { label: "Humidity %", data: humidityValues, borderColor: "#a78bfa", backgroundColor: "#a78bfa22", tension: .3, pointRadius: 2, yAxisID: "y1" }
+      ]},
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: "index", intersect: false },
+        plugins: { legend: { labels: { color: "#dbe7fb" } } },
+        scales: {
+          x: { ticks: { color: "#91a4c0", maxTicksLimit: 8 }, grid: { color: "#24334a" } },
+          y: { position: "left", ticks: { color: "#42d6e8" }, grid: { color: "#24334a" }, title: { display: true, text: "°C", color: "#42d6e8" } },
+          y1: { position: "right", min: 0, max: 100, ticks: { color: "#a78bfa" }, grid: { drawOnChartArea: false }, title: { display: true, text: "%", color: "#a78bfa" } }
+        }
+      }
+    });
+
+    function setConnection(connected, text) {
+      $("connectionDot").className = "dot " + (connected ? "online" : "offline");
+      $("connectionText").textContent = text;
+    }
+    function setSensor(dotId, textId, ok, text) {
+      $(dotId).className = "sensor-dot" + (ok ? "" : " error");
+      $(textId).textContent = text;
+    }
+    function displayNumber(id, value, decimals = 2, unit = "") {
+      if (typeof value !== "number" || !Number.isFinite(value)) {
+        $(id).innerHTML = "—" + (unit ? ` <span class="unit">${unit}</span>` : "");
+      } else {
+        $(id).innerHTML = `${value.toFixed(decimals)}${unit ? ` <span class="unit">${unit}</span>` : ""}`;
+      }
+    }
+    function updateDashboard(d) {
+      const t = Number(d.temperature_c), h = Number(d.humidity_pct), c = Number(d.current_a);
+      const dhtOk = Number.isFinite(t) && Number.isFinite(h) && !(t === 0 && h === 0);
+      if (dhtOk) {
+        displayNumber("temperature", t, 1, "°C");
+        displayNumber("humidity", h, 1, "%");
+        setSensor("dhtDot", "dhtStatus", true, "DHT22 online");
+        setSensor("humidityDot", "humidityStatus", true, "DHT22 online");
+        const stamp = new Date().toLocaleTimeString();
+        labels.push(stamp); tempValues.push(t); humidityValues.push(h);
+        if (labels.length > 30) { labels.shift(); tempValues.shift(); humidityValues.shift(); }
+        chart.update("none");
+      } else {
+        $("temperature").innerHTML = "Sensor error";
+        $("humidity").innerHTML = "Sensor error";
+        setSensor("dhtDot", "dhtStatus", false, "DHT22 unavailable / invalid reading");
+        setSensor("humidityDot", "humidityStatus", false, "DHT22 unavailable / invalid reading");
+      }
+
+      displayNumber("current", c, 3, "A");
+      const mpuOk = d.mpu6050_available === true;
+      $("motionStatus").textContent = mpuOk ? "Online" : "Unavailable";
+      setSensor("mpuDot", "mpuText", mpuOk, mpuOk ? "MPU6050 connected" : "MPU6050 not detected");
+      ["accel_x","accel_y","accel_z","gyro_x","gyro_y","gyro_z"].forEach((key, i) => {
+        const ids = ["ax","ay","az","gx","gy","gz"];
+        $(ids[i]).textContent = mpuOk && Number.isFinite(Number(d[key])) ? Number(d[key]).toFixed(2) : "—";
+      });
+      $("mpuTemp").textContent = mpuOk && Number.isFinite(Number(d.mpu_temp_c)) ? Number(d.mpu_temp_c).toFixed(1) + " °C" : "—";
+      lastReceivedAt = Date.now();
+      $("lastUpdate").textContent = new Date().toLocaleTimeString();
+    }
+
+    // Public HiveMQ broker: the ESP32 and browser must subscribe/publish to the same topic.
+    const client = mqtt.connect(MQTT_HOST, {
+      clientId: "rrce-dashboard-" + Math.random().toString(16).slice(2, 10),
+      clean: true, connectTimeout: 12000, reconnectPeriod: 3000,
+      keepalive: 30
+    });
+
+    client.on("connect", () => {
+      setConnection(true, "MQTT connected · subscribing");
+      client.subscribe(MQTT_TOPIC, { qos: 0 }, err => {
+        if (err) setConnection(false, "MQTT subscription failed");
+        else setConnection(true, "Connected · waiting for ESP32 data");
+      });
+    });
+    client.on("message", (topic, payload) => {
+      if (topic !== MQTT_TOPIC) return;
+      try {
+        const data = JSON.parse(payload.toString());
+        updateDashboard(data);
+        setConnection(true, "Live · MQTT connected");
+      } catch (e) {
+        console.error("Invalid JSON received:", e);
+      }
+    });
+    client.on("reconnect", () => setConnection(false, "Reconnecting to MQTT…"));
+    client.on("offline", () => setConnection(false, "MQTT offline"));
+    client.on("error", err => {
+      console.error("MQTT connection error:", err);
+      setConnection(false, "MQTT connection error");
+    });
+
+    // If no message arrives for 15 seconds, mark the feed as stale.
+    setInterval(() => {
+      if (lastReceivedAt && Date.now() - lastReceivedAt > 15000) {
+        setConnection(false, "No recent sensor data");
+      }
+    }, 3000);
+  </script>
+</body>
+</html>
